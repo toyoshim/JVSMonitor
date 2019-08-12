@@ -55,15 +55,31 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "usbd_cdc_if.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
+enum {
+  S_SYNC,
+  S_NODE,
+  S_BYTE,
+  S_DATA,
+};
+
+enum {
+  B_AVAILABLE,
+  B_ENQUEUED,
+};
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+#define LOG_BUFFER_NUM 4
+#define LOG_BUFFER_SIZE 64
 
 /* USER CODE END PD */
 
@@ -77,6 +93,13 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
+uint8_t log_buffer[LOG_BUFFER_NUM][LOG_BUFFER_SIZE];
+uint8_t log_buffer_state[LOG_BUFFER_NUM];
+uint8_t log_buffer_offset = 0;
+uint8_t log_buffer_id = 0;
+int8_t log_buffer_flush_id = -1;
+int8_t log_buffer_onflight_id = -1;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -84,6 +107,9 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
+
+static void LogPushByte(uint8_t data);
+static void LogFlush();
 
 /* USER CODE END PFP */
 
@@ -128,8 +154,44 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  for (int i = 0; i < LOG_BUFFER_NUM; ++i)
+    log_buffer_state[i] = B_AVAILABLE;
+
+  int state = S_SYNC;
+  int byte = 0;
+
   while (1)
   {
+    uint8_t data;
+    if (HAL_OK != HAL_UART_Receive(&huart2, &data, 1, 0)) {
+      LogFlush();
+      continue;
+    }
+    switch (state) {
+      case S_SYNC:
+        if (data != 0xe0)
+          continue;
+        state = S_NODE;
+        break;
+      case S_NODE:
+        if (data != 0xd0)
+          state = S_BYTE;
+        break;
+      case S_BYTE:
+        if (data != 0xd0) {
+          byte = data;
+          state = S_DATA;
+        }
+        break;
+      case S_DATA:
+        if (data != 0xd0)
+          byte--;
+        if (byte == 0)
+          state = S_SYNC;
+        break;
+    }
+    LogPushByte(data);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -215,9 +277,7 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart2.Init.OverSampling = UART_OVERSAMPLING_16;
   huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXOVERRUNDISABLE_INIT|UART_ADVFEATURE_DMADISABLEONERROR_INIT;
-  huart2.AdvancedInit.OverrunDisable = UART_ADVFEATURE_OVERRUN_DISABLE;
-  huart2.AdvancedInit.DMADisableonRxError = UART_ADVFEATURE_DMA_DISABLEONRXERROR;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
   if (HAL_UART_Init(&huart2) != HAL_OK)
   {
     Error_Handler();
@@ -242,6 +302,50 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+static void LogPushByte(uint8_t data) {
+  log_buffer[log_buffer_id][log_buffer_offset++] = data;
+  if (LOG_BUFFER_SIZE == log_buffer_offset) {
+    uint8_t next_log_buffer_id = (log_buffer_id + 1) % LOG_BUFFER_NUM;
+    if (log_buffer_state[next_log_buffer_id] != B_AVAILABLE) {
+      // If we do not have any other available buffer, reuse the last buffer
+      // again with a buffer overflow mark.
+      log_buffer[log_buffer_id][0] = 0xd0;  // marker code
+      log_buffer[log_buffer_id][1] = 0xf0;  // out-of-spec: buffer overflow
+      log_buffer_offset = 2;
+    } else {
+      log_buffer_state[log_buffer_id] = B_ENQUEUED;
+      if (log_buffer_flush_id == -1)
+	log_buffer_flush_id = log_buffer_id;
+      log_buffer_id = next_log_buffer_id;
+      log_buffer_offset = 0;
+    }
+    LogFlush();
+  }
+}
+
+static void LogFlush() {
+  if (log_buffer_flush_id >= 0) {
+    if (USBD_OK == CDC_Transmit_FS(log_buffer[log_buffer_flush_id], LOG_BUFFER_SIZE)) {
+      if (log_buffer_onflight_id >= 0)
+	log_buffer_state[log_buffer_onflight_id] = B_AVAILABLE;
+      log_buffer_onflight_id = log_buffer_flush_id;
+      log_buffer_flush_id = (log_buffer_flush_id + 1) % LOG_BUFFER_NUM;
+      if (log_buffer_state[log_buffer_flush_id] != B_ENQUEUED)
+	log_buffer_flush_id = -1;
+    }
+    return;
+  }
+  if (0 == log_buffer_offset)
+    return;
+  if (USBD_OK == CDC_Transmit_FS(log_buffer[log_buffer_id], log_buffer_offset)) {
+    if (log_buffer_onflight_id >= 0)
+      log_buffer_state[log_buffer_onflight_id] = B_AVAILABLE;
+    log_buffer_onflight_id = log_buffer_id;
+    log_buffer_id = (log_buffer_id + 1) % LOG_BUFFER_NUM;
+    log_buffer_offset = 0;
+  }
+}
 
 /* USER CODE END 4 */
 
