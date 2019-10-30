@@ -4,6 +4,10 @@ STM32 firmware and tools to monitor JVSIO.
 ## Schematics
 ![Schematics](schematics.png)
 
+- It's omitted in the schematics, but you should need a level converter or at
+least a register to receive a 5V signal. Otherwise, the STM32 will be broken, or
+receive data will become noisy.
+
 - J3 and J2 are pass-through JVS connectors.
 - D+ signal should be monitored by the STM32 to dump protocols.
 - J1 is a standard USB connector to connect with PC. It will be used to write
