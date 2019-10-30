@@ -4,10 +4,13 @@ STM32 firmware and tools to monitor JVSIO.
 ## Schematics
 ![Schematics](schematics.png)
 
-J3 and J2 are pass-through JVS connectors. D+ signal should be monitored by the STM32 to dump protocols.
-J1 is a standard USB connector to connect with PC. It will be used to write firmware, or to be a USB serial peripheral.
-Sniffed data should be dumped via the USB serial port, thus PC decode them to show in the wireshark porotocol analyzer.
-AMS1117-3.3 can be replaced with any other components to generate 3.3V.
+- J3 and J2 are pass-through JVS connectors.
+- D+ signal should be monitored by the STM32 to dump protocols.
+- J1 is a standard USB connector to connect with PC. It will be used to write
+firmware, or to be a USB serial peripheral.
+- Sniffed data should be dumped via the USB serial port, thus PC decodes them to
+show in the wireshark porotocol analyzer.
+- AMS1117-3.3 can be replaced with any other components to generate 3.3V.
 
 ## Firmware
 Prebuilt firmware for the STM32F042K6T6 is submitted in the Release/ directory.
